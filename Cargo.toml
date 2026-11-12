@@ -9,7 +9,12 @@ autobins = false
 name = "indexed-node"
 path = "src/main.rs"
 
+[[bin]]
+name = "blas-file"
+path = "src/bin/blas_file.rs"
+
 [dependencies]
+blake2 = "=0.10.6"
 clap = { version = "4", features = ["derive"] }
 alloy-consensus = { version = "=2.5.0", default-features = false, features = ["std"] }
 alloy-primitives = { version = "=1.7.3", default-features = false, features = ["std"] }

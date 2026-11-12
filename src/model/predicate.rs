@@ -1,5 +1,5 @@
 //! 关键词布尔表达式；NOT 针对单条元数据的关键词集合解释。
-//! 合约传入predicate字节，query.js持有Predicate字段。解析查询时把字节编码成表达式树
+//! 合约传入 predicate JSON 字节，解析为带显式括号的表达式树。
 //! 判断一条日志匹配时query会调用matches
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
     rename_all = "lowercase",
     deny_unknown_fields
 )]
-pub enum Predicate { //表达式定义，递归枚举
+pub enum Predicate {
+    //表达式定义，递归枚举
+    All,
     Keyword(String),
     And(Vec<Self>),
     Or(Vec<Self>),
@@ -33,6 +35,7 @@ impl Predicate {
             return Err("布尔表达式最多 64 个节点、16 层".into());
         }
         match self {
+            Self::All => (),
             Self::Keyword(word) => {
                 *word = word.trim().to_owned();
                 if word.is_empty() || word.len() > 64 {
@@ -55,6 +58,7 @@ impl Predicate {
     /// 对 words 做精确判断，作为所有方案共同遵守的布尔语义。
     pub fn matches(&self, words: &[String]) -> bool {
         match self {
+            Self::All => true,
             Self::Keyword(word) => words.contains(word),
             Self::And(children) => children.iter().all(|child| child.matches(words)),
             Self::Or(children) => children.iter().any(|child| child.matches(words)),

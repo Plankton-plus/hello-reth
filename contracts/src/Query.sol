@@ -11,8 +11,9 @@ contract Query {
         uint64 startBlock;
         uint64 timeMin;
         uint64 timeMax;
-        string[] generators;
+        uint32[] generators;
         bytes predicate;
+        bool aggregate;
     }
 
     struct QueryMatch {
@@ -22,15 +23,20 @@ contract Query {
         bytes rawTransaction;
     }
 
+    struct QueryResponse {
+        QueryMatch[] matches;
+        bytes proof;
+    }
+
     /// @notice 查询历史日志元数据；时间按闭区间相交，谓词支持 AND、OR、NOT。
     /// @param request 快照范围、日志时间、生成器集合及 JSON 布尔表达式字节。
-    /// @return matches 按块高和交易位置排序，包含原始签名交易。
-    function query(QueryRequest calldata request) external view returns (QueryMatch[] memory matches) {
+    /// @return response 匹配交易及方案提供的独立证明，合约不解释具体方案。
+    function query(QueryRequest calldata request) external view returns (QueryResponse memory response) {
         (bool ok, bytes memory data) = PRECOMPILE.staticcall(abi.encode(request));
         if (!ok) {
             // 原样传递节点的 QueryError 或耗气失败，不能返回伪空结果。
             assembly { revert(add(data, 32), mload(data)) }
         }
-        return abi.decode(data, (QueryMatch[]));
+        return abi.decode(data, (QueryResponse));
     }
 }

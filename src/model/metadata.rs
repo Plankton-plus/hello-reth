@@ -1,68 +1,57 @@
-//! note:这个本该设计成一个日志文件的元数据，而不是一个日志元数据
-
-use alloy_primitives::{B256, Bytes};
+//! BLAS Transaction 的链上元数据；Ethereum 签名交易作为外层信封。
+use alloy_primitives::B256;
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 #[serde(deny_unknown_fields)]
 pub struct LogMetadata {
-    pub lid: String, //生成器标志
-    pub fid: String, //文件标志
-    pub ts_min: u64, //时间区间的下届
-    pub ts_max: u64, //时间区间的上届
-    pub fw: Vec<String>, //文件关键词，用于布尔检索
-    pub bm_ew: Bytes, //二进制字段，可能表示布隆/位图编码1
-    pub rh: Vec<B256>, //引用哈希
+    pub lid: u32,
+    pub t_min: u64,
+    pub t_max: u64,
+    pub tx_public_keys: Vec<String>,
+    pub entry_keywords: Vec<String>,
+    pub omt_root: B256,
+    pub iimt_root: B256,
+    pub rimbt_root: B256,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 pub struct IndexedRecord {
-    pub transaction_index: u32, //这条记录对应原始交易在区块中的下标
+    pub transaction_index: u32,
+    pub transaction_hash: B256,
     pub metadata: LogMetadata,
 }
 
-//note:line是一段JSON文本
-impl LogMetadata {
-    /// 解析 line 中的元数据；统一规定 lid 为生成器标识，fid 为文件标识。
-    pub fn parse(line: &str) -> Result<Self, String> {
-        let mut value: Self =
-            serde_json::from_str(line).map_err(|e| format!("元数据 JSON 非法：{e}"))?;
-        if value.lid.trim().is_empty()
-            || value.fid.trim().is_empty()
-            || value.lid.len() > 64
-            || value.fid.len() > 64
-        {
-            return Err("lid 和 fid 必须为 1～64 字节的标识".into());
-        }
-        if value.ts_min > value.ts_max || value.fw.len() > 256 {
-            return Err("日志时间区间倒置或文件关键词超过 256 个".into());
-        }
-        value.lid = value.lid.trim().to_owned();
-        value.fid = value.fid.trim().to_owned();
-        for word in &mut value.fw {
-            *word = word.trim().to_owned();
-            if word.is_empty() || word.len() > 64 {
-                return Err("文件关键词必须为 1～64 字节".into());
-            }
-        }
-        value.fw.sort_unstable();
-        value.fw.dedup();
-        Ok(value)
+/// 规范化 words；limit 限制词表长度，保持关键词区分大小写。
+pub fn normalize_words(words: &mut Vec<String>, limit: usize) -> Result<(), String> {
+    if words.len() > limit {
+        return Err("关键词数量超过协议限制".into());
     }
+    for word in words.iter_mut() {
+        *word = word.trim().to_owned();
+        if word.is_empty() || word.len() > 64 {
+            return Err("关键词须为 1～64 字节".into());
+        }
+    }
+    words.sort_unstable();
+    words.dedup();
+    Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 日志时间与载荷一致，倒置区间和未知字段不能进入共同数据模型。
-    #[test]
-    fn validates_metadata_protocol() {
-        let line = crate::test_support::line();
-        let metadata = LogMetadata::parse(line).unwrap();
-        assert_eq!((metadata.ts_min, metadata.ts_max), (100, 110));
-        assert!(LogMetadata::parse(&line.replace("\"ts_min\":100", "\"ts_min\":111")).is_err());
-        assert!(LogMetadata::parse(&line.replace("\"lid\":\"LG_1\"", "\"lid\":\" \"")).is_err());
-        assert!(LogMetadata::parse(&line.replace("\"rh\":[]", "\"rh\":[],\"extra\":1")).is_err());
+impl LogMetadata {
+    /// 解析 line；三个根独立命名并参与 OMT 承诺。
+    pub fn parse(line: &str) -> Result<Self, String> {
+        let mut value: Self =
+            serde_json::from_str(line).map_err(|e| format!("BLAS 元数据 JSON 非法：{e}"))?;
+        if value.lid == 0 || value.lid > 4096 || value.t_min > value.t_max {
+            return Err("生成器或日志时间范围非法".into());
+        }
+        if [value.omt_root, value.iimt_root, value.rimbt_root].contains(&B256::ZERO) {
+            return Err("文件索引认证根不能为零".into());
+        }
+        normalize_words(&mut value.tx_public_keys, 256)?;
+        normalize_words(&mut value.entry_keywords, 4096)?;
+        Ok(value)
     }
 }

@@ -2,8 +2,9 @@
 /target
 
 # 代码产物
-/tests
 /dataset
+__pycache__/
+*.pyc
 
 # IDE
 .idea/

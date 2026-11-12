@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from client.rpc import rpc
@@ -38,10 +39,18 @@ def submit_sample():
         receipts.extend(wait_receipts(hashes))
     numbers = [int(receipt["blockNumber"], 16) for receipt in receipts]
     assert len(set(numbers)) >= 3, "样本未形成三个不同的数据块"
-    end_receipt = max(receipts, key=lambda r: int(r["blockNumber"], 16))
-    request = {"endBlockHash": end_receipt["blockHash"], "startBlock": min(numbers),
-               "timeMin": min(record["ts_min"] for record in metadata), "timeMax": max(record["ts_max"] for record in metadata),
-               "generators": ["LG_1"], "predicate": DEFAULT_PREDICATE}
+    # 完整四块段让普通与 ALIS 路径都被实际执行，段内空块也必须被覆盖。
+    start = (min(numbers) - 1) // 4 * 4 + 1
+    end = (max(numbers) + 3) // 4 * 4
+    deadline = time.monotonic() + 35
+    while int(rpc("eth_blockNumber", []), 16) < end:
+        if time.monotonic() > deadline:
+            raise AssertionError("等待完整 BLAS 窗口超时")
+        time.sleep(0.2)
+    end_block = rpc("eth_getBlockByNumber", [hex(end), False])
+    request = {"endBlockHash": end_block["hash"], "startBlock": start,
+               "timeMin": min(record["t_min"] for record in metadata), "timeMax": max(record["t_max"] for record in metadata),
+               "generators": [1], "predicate": DEFAULT_PREDICATE, "aggregate": True}
     return {"sender": sender, "request": request, "data_hashes": data_hashes,
             "inputs": inputs, "receipts": receipts}
 
@@ -72,6 +81,9 @@ def setup_demo():
     sample.update(contract=contract, deployment=deployment)
     example = {"contract": contract, "anchor": deployment["blockHash"], "request": sample["request"]}
     Path("/argus/run/query-example.json").write_text(json.dumps(example, ensure_ascii=False, indent=2))
+    entry_example = json.loads(json.dumps(example))
+    entry_example["request"]["entryPredicate"] = {"op": "keyword", "args": "error"}
+    Path("/argus/run/entry-query-example.json").write_text(json.dumps(entry_example, indent=2))
     return sample
 
 
