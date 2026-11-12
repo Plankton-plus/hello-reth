@@ -1,0 +1,48 @@
+# Argus：最小 Reth 节点工程。
+[package]
+name = "argus-node"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+
+[[bin]]
+name = "indexed-node"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+alloy-consensus = { version = "=2.5.0", default-features = false, features = ["std"] }
+alloy-primitives = { version = "=1.7.3", default-features = false, features = ["std"] }
+alloy-sol-types = { version = "=1.7.3", default-features = false, features = ["std"] }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false, features = ["std"] }
+eyre = "=0.6.14"
+alloy-eips = { version = "=2.5.0", default-features = false, features = ["std"] }
+alloy-rlp = { version = "0.3", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonrpsee = { version = "0.26", features = ["server"] }
+reth-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-cli-commands = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-cli-runner = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-rpc-convert = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-ethereum-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", default-features = false }
+reth-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.10.0", features = ["node", "cli"] }
+
+# 固定与 Reth v2.10.0 匹配的 HashBuilder 接口。
+alloy-trie = { version = "=0.9.8", default-features = false }
+
+# 外部 SDK 工程需要显式继承上游的核心依赖补丁。
+[patch.crates-io]
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }

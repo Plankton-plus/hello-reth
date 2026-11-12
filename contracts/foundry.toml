@@ -1,0 +1,8 @@
+# 合约编译产物和缓存仅保存在项目状态卷。
+[profile.default]
+src = "src"
+out = "/argus/run/contracts/out"
+cache_path = "/argus/run/contracts/cache"
+solc = "/argus/run/tools/solc"
+evm_version = "cancun"
+optimizer = true
