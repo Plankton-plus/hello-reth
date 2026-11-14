@@ -1,4 +1,12 @@
 //! IIMT 与双端点范围位图；同一布尔语义用于服务端和独立验证器。
+//! 被块级索引BlockIndex持有
+//! 字段filters：Filters
+//! build 调 Filters::build（从块内 records 抽 keys/times/lids）；
+//! roots 用 filters.roots() 拼出 5 个根（OMT + 四过滤树）；
+//! 被段级索引持有
+//! filters::Filters
+//! build输入微keys/times/lids
+
 use super::{
     bitmap::Bitmap,
     ordered::{OrderedIndex, OrderedProof, decode},
@@ -13,10 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 pub struct Filters {
-    pub keywords: OrderedIndex,
-    pub min_time: OrderedIndex,
-    pub max_time: OrderedIndex,
-    pub generators: OrderedIndex,
+    pub keywords: OrderedIndex, //词->位图
+    pub min_time: OrderedIndex,//min_time
+    pub max_time: OrderedIndex,//max_time
+    pub generators: OrderedIndex,//lid
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -147,13 +155,17 @@ impl Filters {
         ]
     }
 
-    /// 为 query 构造查询关键词及闭区间两个边界的证明。
-    pub fn prove(&self, query: &LogQuery) -> FilterProof {
+    /// 为 query 构造过滤证明；include_keywords 为 false 时由段索引认证关键词。
+    pub fn prove(&self, query: &LogQuery, include_keywords: bool) -> FilterProof {
         FilterProof {
-            keywords: words(&query.predicate)
-                .iter()
-                .map(|key| self.keywords.prove(key))
-                .collect(),
+            keywords: if include_keywords {
+                words(&query.predicate)
+                    .iter()
+                    .map(|key| self.keywords.prove(key))
+                    .collect()
+            } else {
+                Vec::new()
+            },
             min_time: self.min_time.prove(&number(query.time.1)),
             max_time: query
                 .time

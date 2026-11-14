@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
-    pub sn: u32,
-    pub timestamp: u64,
-    pub keywords: Vec<String>,
-    pub log_value: String,
+    pub sn: u32, //文件内序号
+    pub timestamp: u64,//时间戳
+    pub keywords: Vec<String>, //条目关键词
+    pub log_value: String, //日志内容
 }

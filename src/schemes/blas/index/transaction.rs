@@ -1,10 +1,11 @@
 //! BLAS 块内 OMT、IIMT、双时间范围树及其查询证明。
-use super::{
+//! 定义了块内索引层的核心，BlockIndex索引，持久化。IndexProof证明
+use crate::model::{metadata::IndexedRecord, query::LogQuery};
+use crate::schemes::blas::common::{
     bitmap::Bitmap,
     filters::{FilterProof, Filters},
     merkle::{MerkleProof, MerkleTree},
 };
-use crate::model::{metadata::IndexedRecord, query::LogQuery};
 use alloy_primitives::{B256, Bytes};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -13,15 +14,16 @@ use serde::{Deserialize, Serialize};
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 pub struct BlockIndex {
-    pub records: Vec<IndexedRecord>,
-    pub omt: MerkleTree,
-    pub filters: Filters,
+    //IndexedBody::fields::BodyFields::BlockIndex
+    pub records: Vec<IndexedRecord>, //块内全部日志文件元数据
+    pub omt: MerkleTree, //对象Merkle树，叶子 = encode(IndexedRecord),用于证明某个逻辑位置的对象确实存在且内容未被篡改
+    pub filters: Filters, //过滤索引，内部是四棵OrderedIndex：kw,min_time,max_time,lid
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexProof {
-    pub filters: FilterProof,
-    pub objects: Vec<MerkleProof>,
+    pub filters: FilterProof,      //过滤层证明
+    pub objects: Vec<MerkleProof>, //命中对象的OMT路径
 }
 
 impl BlockIndex {
@@ -31,6 +33,7 @@ impl BlockIndex {
             return Err("BLAS 单块最多 256 份日志文件元数据".into());
         }
         let omt = MerkleTree::build(
+            //叶子是整条IndexedRecord的RLP编码，即对象树承诺的是完整元数据
             records
                 .iter()
                 .map(|r| alloy_rlp::encode(r).into())
@@ -38,6 +41,7 @@ impl BlockIndex {
             2,
         );
         let filters = Filters::build(
+            //输入是三个同序数组
             &records
                 .iter()
                 .map(|r| r.metadata.tx_public_keys.clone())
@@ -65,43 +69,31 @@ impl BlockIndex {
         roots
     }
 
-    /// 为 query 生成原生关键词证明及命中对象的 OMT 路径。
-    pub fn prove(&self, query: &LogQuery) -> Result<IndexProof, String> {
-        let filters = self.filters.prove(query);
-        let bitmap = filters.verify(&self.filters.roots(), self.records.len(), query, false)?;
-        Ok(IndexProof {
-            filters,
-            objects: bitmap
-                .indices()
-                .into_iter()
-                .map(|i| self.omt.prove(i))
-                .collect(),
-        })
-    }
-
-    /// 按外部聚合位图 bitmap 生成对象路径，省略块内关键词证明。
-    pub fn prove_aggregated(
+    /// 按 query 过滤；keywords 可提供聚合位图，with_objects 决定是否生成块内 OMT。
+    pub fn prove(
         &self,
         query: &LogQuery,
-        values: &std::collections::BTreeMap<String, Bitmap>,
-    ) -> Result<IndexProof, String> {
-        let mut filters = self.filters.prove(query);
-        filters.keywords.clear();
+        keywords: Option<&std::collections::BTreeMap<String, Bitmap>>,
+        with_objects: bool,
+    ) -> Result<(IndexProof, Bitmap), String> {
+        let filters = self.filters.prove(query, keywords.is_none());
         let bitmap = filters.verify_with_keywords(
             &self.filters.roots(),
             self.records.len(),
             query,
             false,
-            Some(values),
+            keywords,
         )?;
-        Ok(IndexProof {
-            filters,
-            objects: bitmap
+        let objects = if with_objects {
+            bitmap
                 .indices()
                 .into_iter()
                 .map(|i| self.omt.prove(i))
-                .collect(),
-        })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Ok((IndexProof { filters, objects }, bitmap))
     }
 }
 

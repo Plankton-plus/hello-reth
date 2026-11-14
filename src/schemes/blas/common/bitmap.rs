@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 pub struct Bitmap {
-    pub len: u32,
-    pub bits: Bytes,
+    pub len: u32,    //有效对象数，真实对象数不一定是8的倍数
+    pub bits: Bytes, //位存储
 }
 
 impl Bitmap {
     /// 创建 len 位的零或一位图；full 决定初值。
     pub fn new(len: usize, full: bool) -> Self {
-        let mut bits = vec![if full { 255 } else { 0 }; len.div_ceil(8)];
+        let mut bits = vec![if full { 255 } else { 0 }; len.div_ceil(8)]; //向上取整，算出需要多少个字节
         if full && len % 8 != 0 {
             *bits.last_mut().unwrap() &= (1 << (len % 8)) - 1;
         }

@@ -1,4 +1,6 @@
 //! 静态有序 Merkle 索引；邻接叶证明同时认证命中、缺失和范围边界。
+//! 在Merkle之上，实现了一种静态有序Merkle索引。把键值对按键排序打包进一颗Merkle树，证明时用一对相邻叶（前驱后继）就能
+//! 同时认证命中，缺失、范围边界三种情况
 use super::merkle::{MerkleProof, MerkleTree};
 use alloy_primitives::{B256, Bytes};
 use alloy_rlp::{Decodable, RlpDecodable, RlpEncodable};
@@ -7,6 +9,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 pub struct Leaf {
+    //一片有序叶子
     pub key: String,
     pub value: Bytes,
 }
@@ -15,16 +18,18 @@ pub struct Leaf {
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 pub struct OrderedIndex {
-    pub leaves: Vec<Leaf>,
-    pub tree: MerkleTree,
+    //服务端持有的完整有序索引
+    pub leaves: Vec<Leaf>, //按键升序
+    pub tree: MerkleTree,  //把每片Leaf的RLP当叶子打包成的Merkle树
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OrderedProof {
+    //验证者持有的证明
     pub key: String,
     pub fanout: u32,
-    pub left: Option<MerkleProof>,
-    pub right: Option<MerkleProof>,
+    pub left: Option<MerkleProof>,  //前驱叶子的Merkle路径
+    pub right: Option<MerkleProof>, //后继叶子的Merkle路径
 }
 
 /// 从 bytes 解码一个规范 RLP 值，拒绝尾随字节。

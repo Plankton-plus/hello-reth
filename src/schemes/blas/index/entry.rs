@@ -1,15 +1,15 @@
 //! 链下 LogFile：条目 OMT、关键词 IIMT、timestamp→sn 的四叉时间索引。
-use super::{
-    bitmap::Bitmap,
-    filters::{evaluate, number, words},
-    merkle::{MerkleProof, MerkleTree, hash},
-    ordered::{Leaf, OrderedIndex, OrderedProof, decode},
-};
 use crate::model::{
     entry::Entry,
     metadata::{LogMetadata, normalize_words},
     predicate::Predicate,
     query::LogQuery,
+};
+use crate::schemes::blas::common::{
+    bitmap::Bitmap,
+    filters::{evaluate, number, words},
+    merkle::{MerkleProof, MerkleTree, hash},
+    ordered::{Leaf, OrderedIndex, OrderedProof, decode},
 };
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};

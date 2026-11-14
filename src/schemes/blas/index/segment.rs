@@ -1,12 +1,14 @@
 //! 分段窗口索引与 ALIS：共享关键词目录，下层树认证各块的交易位图。
-use super::{
+//! 实现段级索引，对应论文里的ALIS/段级索引。跨块查询时，不必每个块重复认证，而是用一个共享关键词目录+每关键词一颗下层位图
+//! 来统一认证。
+use super::{generator::GeneratorIndex, transaction::BlockIndex};
+use crate::model::query::LogQuery;
+use crate::schemes::blas::common::{
     bitmap::Bitmap,
-    block::BlockIndex,
     filters::{FilterProof, Filters, words},
     merkle::{MerkleProof, MerkleTree, hash},
     ordered::{OrderedIndex, OrderedProof, decode},
 };
-use crate::model::query::LogQuery;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -47,10 +49,12 @@ impl BlockSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 pub struct WindowDescriptor {
+    //窗口的认证描述符
     pub start: u64,
     pub blocks: Vec<BlockSummary>,
-    pub filter_roots: Vec<B256>,
-    pub down_root: B256,
+    pub filter_roots: Vec<B256>, //过滤索引的根
+    pub down_root: B256,         //共享关键词目录的根
+    pub generator_root: B256,    //生成聚合目录的根
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
@@ -58,8 +62,9 @@ pub struct WindowIndex {
     pub start: u64,
     pub blocks: Vec<BlockSummary>,
     pub filters: Filters,
-    pub directory: OrderedIndex,
-    pub down: Vec<MerkleTree>,
+    pub directory: OrderedIndex, //关键词，下层树根
+    pub down: Vec<MerkleTree>,   //每个关键词一颗各块位图树
+    pub generators: GeneratorIndex,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -73,6 +78,7 @@ impl WindowIndex {
     /// 校验目录、下层树和共享根的连接；父链语义由接收时重建验证。
     pub fn validate(&self) -> Result<(), String> {
         self.filters.validate()?;
+        self.generators.validate()?;
         self.directory.validate()?;
         if self.directory.leaves.len() != self.down.len() {
             return Err("聚合目录长度不一致".into());
@@ -144,6 +150,7 @@ impl WindowIndex {
             start,
             blocks,
             filters,
+            generators: GeneratorIndex::build(start, indexes),
             directory: OrderedIndex::build(directory, 2),
             down,
         })
@@ -156,6 +163,7 @@ impl WindowIndex {
             blocks: self.blocks.clone(),
             filter_roots: self.filters.roots(),
             down_root: self.directory.tree.root(),
+            generator_root: self.generators.directory.tree.root(),
         }
     }
 
@@ -168,7 +176,7 @@ impl WindowIndex {
     pub fn prove(&self, query: &LogQuery) -> WindowProof {
         WindowProof {
             descriptor: self.descriptor(),
-            filters: self.filters.prove(query),
+            filters: self.filters.prove(query, true),
             directory: words(&query.predicate)
                 .iter()
                 .map(|key| self.directory.prove(key))

@@ -21,7 +21,7 @@ sol! {
         bytes32 blockHash;
         uint32 transactionIndex;
         bytes32 transactionHash;
-        bytes rawTransaction;
+        bytes rawTransaction;//链上就是文件级查询
     }
 
     #[derive(Debug)]

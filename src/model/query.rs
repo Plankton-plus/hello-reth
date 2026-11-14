@@ -4,17 +4,17 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogQuery {
-    pub generators: Vec<u32>,
-    pub time: (u64, u64),
-    pub predicate: Predicate,
+    pub generators: Vec<u32>, //生成器列表
+    pub time: (u64, u64), //时间闭区间
+    pub predicate: Predicate, //文件级谓词
     #[serde(default)]
-    pub entry_predicate: Option<Predicate>,
+    pub entry_predicate: Option<Predicate>, //条目级谓词（可选）
     #[serde(default)]
-    pub aggregate: bool,
+    pub aggregate: bool,//是否走窗口聚合路径
 }
 
 impl LogQuery {
-    /// 校验从文件读取的业务查询；复用合约入口的限制，不接受未规范化谓词。
+    /// 校验并规范化从文件读取的查询。主要被blas_file的query/verify/verify-chain读入JSON后调用
     pub fn normalize(self) -> Result<Self, String> {
         let mut value = Self::new(
             self.generators,

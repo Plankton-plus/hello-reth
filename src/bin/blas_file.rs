@@ -3,7 +3,7 @@ use argus_node::{
     model::{metadata::LogMetadata, query::LogQuery},
     query::abi::QueryMatch,
     schemes::blas::{
-        file::{FileInput, FileProof, LogFile},
+        index::entry::{FileInput, FileProof, LogFile},
         proof::{QueryProof, TrustedHeader},
     },
 };
@@ -11,11 +11,11 @@ use serde::{Deserialize, de::DeserializeOwned};
 use std::{error::Error, fs, path::Path};
 
 #[derive(Deserialize)]
-struct ChainInput {
-    headers: Vec<TrustedHeader>,
-    query: LogQuery,
-    proof: QueryProof,
-    matches: Vec<QueryMatch>,
+struct ChainInput { //verify-chain链上独立验证命令的输入结构
+    headers: Vec<TrustedHeader>, //可信区块头列表
+    query: LogQuery, //被执行的业务查询
+    proof: QueryProof,//服务端返回的查询证明
+    matches: Vec<QueryMatch>,//ABI返回的命中结果
 }
 
 /// 从 path 读取 JSON；输入上限限制损坏或意外大文件的内存占用。

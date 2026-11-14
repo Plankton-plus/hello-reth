@@ -62,3 +62,4 @@ mod tests {
         assert!(record_from_input(RECORD_TAG, 0).is_err());
     }
 }
+

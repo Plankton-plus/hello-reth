@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 #[serde(deny_unknown_fields)]
 pub struct LogMetadata {
-    pub lid: u32,
-    pub t_min: u64,
-    pub t_max: u64,
-    pub tx_public_keys: Vec<String>,
-    pub entry_keywords: Vec<String>,
-    pub omt_root: B256,
-    pub iimt_root: B256,
-    pub rimbt_root: B256,
+    pub lid: u32, //标志这份文件属于哪个生成器
+    pub t_min: u64,  //文件内所有条目时间戳的最小值
+    pub t_max: u64,//最大值
+    pub tx_public_keys: Vec<String>, //文件级关键字
+    pub entry_keywords: Vec<String>,//整个文件所有条目的词表并集
+    pub omt_root: B256,//把链下文件内容承诺到链上密码学，承诺全部条目本体。查询命中某条日志后，SO给出的OMT路径
+    pub iimt_root: B256,//倒排关键词索引
+    pub rimbt_root: B256,//时间范围索引，并额外绑定了条目数量
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]

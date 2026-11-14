@@ -1,8 +1,9 @@
-//! BLAKE2s Merkle 树及独立路径验证；根认证扇出和叶子数量。
+//! BLAKE2s Merkle 树及独立路径验证；根认证扇出和叶子数量。通用Merkle树基层
 use alloy_primitives::{B256, Bytes};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use blake2::{Blake2s256, Digest};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// 返回 data 的 BLAKE2s-256 摘要，与上游实际算法一致。
 pub fn hash(data: &[u8]) -> B256 {
@@ -123,33 +124,100 @@ impl MerkleTree {
 impl MerkleProof {
     /// 仅凭路径和外部可信根 expected 验证，不读取服务端树。
     pub fn verify(&self, expected: B256) -> Result<(), String> {
-        if !(2..=256).contains(&self.fanout) || self.index >= self.count || self.count > 1_000_000 {
-            return Err("Merkle 证明参数非法".into());
+        MerkleMultiProof {
+            fanout: self.fanout,
+            count: self.count,
+            indices: vec![self.index],
+            leaves: vec![self.leaf.clone()],
+            siblings: self.siblings.iter().flatten().copied().collect(),
         }
-        let (mut index, mut count) = (self.index, self.count);
-        let mut node = tagged(0, vec![self.leaf.clone()]);
-        let mut paths = self.siblings.iter();
-        while count > 1 {
-            let siblings = paths.next().ok_or("Merkle 路径缺失")?;
-            let start = index / self.fanout as usize * self.fanout as usize;
-            let width = (count - start).min(self.fanout as usize);
-            if siblings.len() + 1 != width {
-                return Err("Merkle 路径宽度非法".into());
+        .verify(expected)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MerkleMultiProof {
+    pub fanout: u32,
+    pub count: usize,
+    pub indices: Vec<usize>,
+    pub leaves: Vec<Bytes>,
+    pub siblings: Vec<B256>,
+}
+
+impl MerkleTree {
+    /// 为严格递增的 indices 生成共享证明，每个缺失兄弟节点仅写入一次。
+    pub fn multi_prove(&self, indices: &[usize]) -> Result<MerkleMultiProof, String> {
+        if indices.is_empty()
+            || indices.windows(2).any(|pair| pair[0] >= pair[1])
+            || *indices.last().unwrap() >= self.leaves.len()
+        {
+            return Err("共享证明位置非法".into());
+        }
+        let mut proof = MerkleMultiProof {
+            fanout: self.fanout,
+            count: self.leaves.len(),
+            indices: indices.to_vec(),
+            leaves: indices.iter().map(|i| self.leaves[*i].clone()).collect(),
+            siblings: Vec::new(),
+        };
+        let mut active: BTreeSet<_> = indices.iter().copied().collect();
+        for level in self.levels.iter().take(self.levels.len() - 1) {
+            let parents: BTreeSet<_> = active.iter().map(|i| i / self.fanout as usize).collect();
+            for parent in &parents {
+                let start = parent * self.fanout as usize;
+                for i in start..(start + self.fanout as usize).min(level.len()) {
+                    if !active.contains(&i) {
+                        proof.siblings.push(level[i]);
+                    }
+                }
             }
-            let mut children = siblings.clone();
-            children.insert(index - start, node);
-            node = tagged(
-                1,
-                children
-                    .iter()
-                    .map(|h| h.as_slice().to_vec().into())
-                    .collect(),
-            );
-            count = count.div_ceil(self.fanout as usize);
-            index /= self.fanout as usize;
+            active = parents;
         }
-        if paths.next().is_some() || commitment(self.fanout, self.count, node) != expected {
-            return Err("Merkle 认证根不匹配".into());
+        Ok(proof)
+    }
+}
+
+impl MerkleMultiProof {
+    /// 验证严格递增的叶位置、全部共享节点及外部承诺 expected。
+    pub fn verify(&self, expected: B256) -> Result<(), String> {
+        if !(2..=256).contains(&self.fanout)
+            || self.count > 1_000_000
+            || self.indices.is_empty()
+            || self.indices.len() != self.leaves.len()
+            || self.indices.windows(2).any(|pair| pair[0] >= pair[1])
+            || *self.indices.last().unwrap() >= self.count
+        {
+            return Err("共享证明参数非法".into());
+        }
+        let mut active: BTreeMap<_, _> = self
+            .indices
+            .iter()
+            .copied()
+            .zip(self.leaves.iter().map(|leaf| tagged(0, vec![leaf.clone()])))
+            .collect();
+        let mut count = self.count;
+        let mut siblings = self.siblings.iter();
+        while count > 1 {
+            let parents: BTreeSet<_> = active.keys().map(|i| i / self.fanout as usize).collect();
+            let mut next = BTreeMap::new();
+            for parent in parents {
+                let start = parent * self.fanout as usize;
+                let mut children = Vec::new();
+                for i in start..(start + self.fanout as usize).min(count) {
+                    let child = match active.get(&i) {
+                        Some(hash) => hash,
+                        None => siblings.next().ok_or("共享证明兄弟节点缺失")?,
+                    };
+                    children.push(child.as_slice().to_vec().into());
+                }
+                next.insert(parent, tagged(1, children));
+            }
+            active = next;
+            count = count.div_ceil(self.fanout as usize);
+        }
+        let root = *active.get(&0).ok_or("共享证明根缺失")?;
+        if siblings.next().is_some() || commitment(self.fanout, self.count, root) != expected {
+            return Err("共享证明认证根不匹配".into());
         }
         Ok(())
     }

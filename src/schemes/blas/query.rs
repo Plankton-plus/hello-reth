@@ -1,14 +1,13 @@
 //! BLAS 原生查询：普通块内路径与窗口共享目录路径，返回结果及独立 VO。
 use super::{
     BodyFields, HeaderFields,
-    block::IndexProof,
-    ordered::decode,
+    common::bitmap::Bitmap,
+    index::segment::WINDOW_BLOCKS,
     proof::{BlockWitness, GroupProof, QueryProof},
-    window::WINDOW_BLOCKS,
 };
 use crate::{
     chain::BlockView,
-    model::{metadata::IndexedRecord, query::LogQuery},
+    model::query::LogQuery,
     query::{
         abi::{QueryMatch, QueryResponse},
         context::{QueryContext, QueryFailure, WorkBudget},
@@ -16,17 +15,18 @@ use crate::{
     },
 };
 
-/// 从已证明对象得到真实交易位置，并复用公共 ABI 格式化。
+use std::collections::BTreeMap;
+
+/// 按命中 bitmap 读取 block 中的真实交易位置，复用公共 ABI 格式化。
 fn rows(
     block: &BlockView<HeaderFields, BodyFields>,
-    proof: &IndexProof,
+    bitmap: &Bitmap,
 ) -> Result<Vec<QueryMatch>, QueryFailure> {
-    let positions = proof
-        .objects
-        .iter()
-        .map(|path| decode::<IndexedRecord>(&path.leaf).map(|r| r.transaction_index))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(QueryFailure::Storage)?;
+    let positions = bitmap
+        .indices()
+        .into_iter()
+        .map(|i| block.fields.index.records[i].transaction_index)
+        .collect();
     result::matches(block, positions)
 }
 
@@ -42,15 +42,39 @@ pub fn execute(
     let mut chunks = Vec::new();
     while height >= context.start {
         let header = context.header(hash, budget)?;
-        if header.number != height {
-            return Err(QueryFailure::Storage("BLAS 历史块不连续".into()));
+        if query.aggregate && header.fields.past_max_time < query.time.0 {
+            groups.push(GroupProof::Skip {
+                count: (height - context.start + 1) as usize,
+            });
+            break;
         }
-        let block = context.block(hash, budget)?;
-        budget.spend(500 + block.fields.index.records.len() as u64 * 100)?;
-        if query.aggregate
+        let size = if query.aggregate
             && height % WINDOW_BLOCKS == 0
             && height - WINDOW_BLOCKS + 1 >= context.start
         {
+            WINDOW_BLOCKS
+        } else {
+            1
+        };
+        let mut cursor = header.parent_hash;
+        let mut headers = vec![header];
+        for _ in 1..size {
+            let item = context.header(cursor, budget)?;
+            cursor = item.parent_hash;
+            headers.push(item);
+        }
+        headers.reverse();
+        if query.aggregate && headers.iter().all(|h| h.fields.outside(query.time)) {
+            groups.push(GroupProof::Skip {
+                count: size as usize,
+            });
+            hash = cursor;
+            height -= size;
+            continue;
+        }
+        let block = context.block(hash, budget)?;
+        budget.spend(500 + block.fields.index.records.len() as u64 * 100)?;
+        if size == WINDOW_BLOCKS {
             let window = block
                 .fields
                 .windows
@@ -58,52 +82,63 @@ pub fn execute(
                 .ok_or_else(|| QueryFailure::Storage("完整窗口索引缺失".into()))?;
             let proof = window.prove(query);
             let candidates = proof
-                .candidates(header.fields.roots[5], query)
+                .candidates(headers.last().unwrap().fields.roots[5], query)
                 .map_err(QueryFailure::Storage)?
                 .indices();
-            let mut hashes = Vec::new();
-            let mut cursor = hash;
-            for _ in 0..WINDOW_BLOCKS {
-                let item = context.header(cursor, budget)?;
-                hashes.push(cursor);
-                cursor = item.parent_hash;
-            }
-            hashes.reverse();
+            let mut selected = BTreeMap::new();
             let mut witnesses = Vec::new();
             let mut matches = Vec::new();
             for offset in candidates {
-                let candidate = context.block(hashes[offset], budget)?;
+                let candidate = context.block(headers[offset].hash, budget)?;
                 let paths = window.keyword_paths(query, offset);
                 let values = proof
                     .keyword_values(query, offset, &paths)
                     .map_err(QueryFailure::Storage)?;
-                let index = candidate
+                let use_omt = query.generators.is_empty();
+                let (index, bitmap) = candidate
                     .fields
                     .index
-                    .prove_aggregated(query, &values)
+                    .prove(query, Some(&values), use_omt)
                     .map_err(QueryFailure::Storage)?;
-                matches.extend(rows(&candidate, &index)?);
+                matches.extend(rows(&candidate, &bitmap)?);
+                if !use_omt {
+                    for position in bitmap.indices() {
+                        selected.insert(
+                            (window.start + offset as u64, position as u32),
+                            candidate.fields.index.records[position].clone(),
+                        );
+                    }
+                }
                 witnesses.push(BlockWitness {
-                    hash: hashes[offset],
+                    hash: headers[offset].hash,
                     index,
                     keywords: paths,
                 });
             }
+            if !query.generators.is_empty() {
+                let count: usize = window.generators.trees.iter().map(|t| t.leaves.len()).sum();
+                budget.spend(500 * query.generators.len() as u64 + 100 * count as u64)?;
+            }
+            let generators = query
+                .generators
+                .iter()
+                .map(|lid| window.generators.prove(*lid, &selected))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(QueryFailure::Storage)?;
             groups.push(GroupProof::Window {
                 end_hash: hash,
                 window: proof,
                 blocks: witnesses,
+                generators,
             });
             chunks.push(matches);
-            hash = cursor;
-            height -= WINDOW_BLOCKS;
         } else {
-            let index = block
+            let (index, bitmap) = block
                 .fields
                 .index
-                .prove(query)
+                .prove(query, None, true)
                 .map_err(QueryFailure::Storage)?;
-            chunks.push(rows(&block, &index)?);
+            chunks.push(rows(&block, &bitmap)?);
             groups.push(GroupProof::Block {
                 block: BlockWitness {
                     hash,
@@ -111,9 +146,9 @@ pub fn execute(
                     keywords: vec![],
                 },
             });
-            hash = header.parent_hash;
-            height -= 1;
         }
+        hash = cursor;
+        height -= size;
     }
     groups.reverse();
     let proof = serde_json::to_vec(&QueryProof { groups })

@@ -1,6 +1,5 @@
 //! 关键词布尔表达式；NOT 针对单条元数据的关键词集合解释。
 //! 合约传入 predicate JSON 字节，解析为带显式括号的表达式树。
-//! 判断一条日志匹配时query会调用matches
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

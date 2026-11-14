@@ -1,13 +1,8 @@
 //! BLAS：文件层、块内索引及分段聚合；Reth 框架仅通过 Scheme 调用本模块。
-pub mod bitmap;
-pub mod block;
-pub mod file;
-pub mod filters;
-pub mod merkle;
-pub mod ordered;
+pub mod common;
+pub mod index;
 pub mod proof;
 pub mod query;
-pub mod window;
 
 #[cfg(test)]
 mod tests;
@@ -23,14 +18,15 @@ use crate::{
 };
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use block::BlockIndex;
+use index::segment::{BlockSummary, WINDOW_BLOCKS, WindowIndex};
+use index::transaction::BlockIndex;
 use serde::{Deserialize, Serialize};
-use window::{BlockSummary, WINDOW_BLOCKS, WindowIndex};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 pub struct HeaderFields {
     pub min_tx_time: u64,
     pub max_tx_time: u64,
+    pub past_max_time: u64,
     pub record_count: u64,
     pub roots: Vec<B256>,
     pub window_size: u64,
@@ -42,6 +38,7 @@ impl Default for HeaderFields {
         Self {
             min_tx_time: 0,
             max_tx_time: 0,
+            past_max_time: 0,
             record_count: 0,
             roots: vec![],
             window_size: WINDOW_BLOCKS,
@@ -57,11 +54,18 @@ pub struct BodyFields {
     pub windows: Vec<WindowIndex>,
 }
 
+impl HeaderFields {
+    /// time 为闭区间；空块或时间包围区间不相交时无需读取块体。
+    pub fn outside(&self, time: (u64, u64)) -> bool {
+        self.record_count == 0 || self.max_tx_time < time.0 || self.min_tx_time > time.1
+    }
+}
+
 pub struct BlasScheme;
 
 impl Scheme for BlasScheme {
     const ID: u16 = 25;
-    const VERSION: u16 = 1;
+    const VERSION: u16 = 3;
     type HeaderFields = HeaderFields;
     type BodyFields = BodyFields;
 
@@ -72,11 +76,15 @@ impl Scheme for BlasScheme {
     ) -> Result<(HeaderFields, BodyFields), String> {
         let index = BlockIndex::build(records.to_vec())?;
         let summary = BlockSummary::new(&index);
-        let height = if context.parent_hash == B256::ZERO {
-            1
+        let parent = if context.parent_hash == B256::ZERO {
+            None
         } else {
-            context.header(context.parent_hash)?.number + 1
+            Some(context.header(context.parent_hash)?)
         };
+        let height = parent.as_ref().map_or(1, |header| header.number + 1);
+        let past_max_time = parent
+            .map_or(0, |header| header.fields.past_max_time)
+            .max(summary.max_time);
         let mut windows = Vec::new();
         if height % WINDOW_BLOCKS == 0 {
             let mut cursor = context.parent_hash;
@@ -99,6 +107,7 @@ impl Scheme for BlasScheme {
             HeaderFields {
                 min_tx_time: summary.min_time,
                 max_tx_time: summary.max_time,
+                past_max_time,
                 record_count: records.len() as u64,
                 roots,
                 window_size: WINDOW_BLOCKS,
@@ -130,6 +139,7 @@ impl Scheme for BlasScheme {
         if header.roots != roots
             || header.record_count != expected.records.len() as u64
             || header.min_tx_time != summary.min_time
+            || header.past_max_time < summary.max_time
             || header.max_tx_time != summary.max_time
         {
             return Err("BLAS 索引承诺或时间边界不一致".into());

@@ -31,7 +31,7 @@ def native_hash(header):
     ethereum = [b"" if name not in header else int(header[name], 16) if name in quantities
                 else bytes.fromhex(header[name][2:]) for name in names[:last + 1]]
     fields = header["fields"]
-    extension = [fields["min_tx_time"], fields["max_tx_time"], fields["record_count"],
+    extension = [fields["min_tx_time"], fields["max_tx_time"], fields["past_max_time"], fields["record_count"],
                  [bytes.fromhex(root[2:]) for root in fields["roots"]], fields["window_size"]]
     return cast("keccak", "0x" + rlp([ethereum, header["scheme"], header["version"], extension]).hex())
 
@@ -43,7 +43,7 @@ def authenticated_headers(request):
         header = rpc("eth_getBlockByHash", [cursor, False])
         assert header and native_hash(header) == cursor, "原生区块头哈希不一致"
         number = int(header["number"], 16)
-        assert header["scheme"] == 25 and header["version"] == 1
+        assert header["scheme"] == 25 and header["version"] == 3
         headers.append({"hash": cursor, "number": number, "fields": header["fields"]})
         if number == request["startBlock"]:
             headers.reverse()
