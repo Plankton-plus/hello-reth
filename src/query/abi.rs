@@ -11,15 +11,22 @@ sol! {
         uint64 startBlock;
         uint64 timeMin;
         uint64 timeMax;
-        string[] generators;
+        uint32[] generators;
         bytes predicate;
+        bool aggregate;
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct QueryMatch {
         bytes32 blockHash;
         uint32 transactionIndex;
         bytes32 transactionHash;
-        bytes rawTransaction;
+        bytes rawTransaction;//链上就是文件级查询
+    }
+
+    #[derive(Debug)]
+    struct QueryResponse {
+        QueryMatch[] matches;
+        bytes proof;
     }
 }

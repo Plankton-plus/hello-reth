@@ -4,7 +4,7 @@ use crate::{
     chain::BuildContext,
     model::{metadata::IndexedRecord, query::LogQuery},
     query::{
-        abi::QueryMatch,
+        abi::QueryResponse,
         context::{QueryContext, QueryFailure, WorkBudget},
     },
 };
@@ -13,7 +13,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Debug, hash::Hash};
 
 /// 每条实验链固定一个方案；方案变更使用独立数据库。
-pub type ActiveScheme = crate::schemes::bf::BfScheme;
+pub type ActiveScheme = crate::schemes::blas::BlasScheme;
 pub type HeaderFields = <ActiveScheme as Scheme>::HeaderFields;
 pub type BodyFields = <ActiveScheme as Scheme>::BodyFields;
 pub type SchemeReader = crate::chain::ChainReader<HeaderFields, BodyFields>;
@@ -74,5 +74,5 @@ pub trait Scheme: Sized {
         context: &QueryContext<'_, Self::HeaderFields, Self::BodyFields>,
         query: &LogQuery,
         budget: &mut dyn WorkBudget,
-    ) -> Result<Vec<QueryMatch>, QueryFailure>;
+    ) -> Result<QueryResponse, QueryFailure>;
 }

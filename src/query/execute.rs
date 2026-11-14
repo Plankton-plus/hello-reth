@@ -55,12 +55,13 @@ fn decode_query(input: &[u8]) -> Result<(QueryRequest, LogQuery), PrecompileErro
     }
     let request =
         QueryRequest::abi_decode_validate(input).map_err(|_| query_error("查询 ABI 非法"))?;
-    let query = LogQuery::new(
+    let mut query = LogQuery::new(
         request.generators.clone(),
         (request.timeMin, request.timeMax),
         &request.predicate,
     )
     .map_err(query_error)?;
+    query.aggregate = request.aggregate;
     Ok((request, query))
 }
 
@@ -113,12 +114,12 @@ pub fn execute_query(
         reader,
         ancestors,
     );
-    let matches =
+    let response =
         ActiveScheme::query(&context, &query, &mut Budget(gas)).map_err(execution_error)?;
-    if matches.len() > 128 {
+    if response.matches.len() > 128 {
         return Err(query_error("结果超过 128 条，请缩小范围"));
     }
-    let output = matches.abi_encode();
+    let output = response.abi_encode();
     if output.len() > 65536 {
         return Err(query_error("输出超过 64 KiB，请缩小范围"));
     }

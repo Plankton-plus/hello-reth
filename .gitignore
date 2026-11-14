@@ -1,9 +1,11 @@
 # Rust 构建产物
 /target
+/tests
 
 # 代码产物
-/tests
 /dataset
+__pycache__/
+*.pyc
 
 # IDE
 .idea/

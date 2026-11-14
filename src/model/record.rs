@@ -37,6 +37,7 @@ pub fn records_from_transactions(
             if let Some(raw) = record_from_input(transaction.input(), position)? {
                 records.push(IndexedRecord {
                     transaction_index: raw.transaction_index,
+                    transaction_hash: *transaction.hash(),
                     metadata: LogMetadata::parse(raw.line)?,
                 });
             }
@@ -61,3 +62,4 @@ mod tests {
         assert!(record_from_input(RECORD_TAG, 0).is_err());
     }
 }
+

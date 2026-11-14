@@ -52,13 +52,14 @@ impl IndexedBlock {
         reader: &SchemeReader,
     ) -> Result<Self, String> {
         let records = records_from_transactions(&ethereum.body.transactions)?;
-        let context = BuildContext::new(ethereum.header.parent_hash, reader);//显示查询只能是祖先块，不是旁支
-        let (fields, body_fields) = ActiveScheme::build(&context, &records)?;//从本块交易抽出的数据记录+父链只读试图算出头字段+体字段
+        let context = BuildContext::new(ethereum.header.parent_hash, reader); //显示查询只能是祖先块，不是旁支
+        let (fields, body_fields) = ActiveScheme::build(&context, &records)?; //从本块交易抽出的数据记录+父链只读试图算出头字段+体字段
         let mut header = IndexedHeader::from(ethereum.header);
-        header.fields = fields;//标准头 -> IndexedHeader，再把头字段填入
+        header.fields = fields; //标准头 -> IndexedHeader，再把头字段填入
         Ok(Self {
             header,
-            body: IndexedBody { //体部照搬+体字段填进去
+            body: IndexedBody {
+                //体部照搬+体字段填进去
                 ethereum: EthBody {
                     transactions: ethereum.body.transactions,
                     ommers: ethereum.body.ommers.into_iter().map(Into::into).collect(),

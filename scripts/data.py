@@ -2,35 +2,52 @@
 
 import hashlib
 import json
-from datetime import datetime
+import subprocess
 from pathlib import Path
 
-SAMPLE = Path("/argus/shared/framework/metadata.jsonl")
-
-
-def timestamp(value):
-    """将带时区的 ISO 时间 value 转为秒级时间戳。"""
-    return int(datetime.fromisoformat(value).timestamp())
+SAMPLE = Path("/argus/shared/blas/metadata.jsonl")
+FILES = SAMPLE.parent / "files"
+INPUTS = SAMPLE.parent / "inputs.jsonl"
+TOOL = "/argus/target/debug/blas-file"
 
 
 def generate():
-    """显式生成六份文件元数据；时间表示文件内日志区间，内容用于微型验收。"""
-    rows = [
-        ("LG_1", "F1", "2024-05-15T12:00:00+08:00", "2024-05-15T12:05:00+08:00", ["FTP"]),
-        ("LG_1", "F2", "2024-05-15T12:10:00+08:00", "2024-05-15T12:15:00+08:00", ["FTP", "incorrect_pwd"]),
-        ("LG_1", "F3", "2024-05-15T12:20:00+08:00", "2024-05-15T12:25:00+08:00", ["FTP", "Admin", "incorrect_pwd"]),
-        ("LG_1", "F4", "2024-05-16T10:00:00+08:00", "2024-05-16T10:05:00+08:00", ["FTP", "incorrect_usr"]),
-        ("LG_2", "F5", "2024-05-16T10:10:00+08:00", "2024-05-16T10:15:00+08:00", ["FTP", "incorrect_pwd"]),
-        ("LG_1", "F6", "2024-05-16T10:20:00+08:00", "2024-05-16T10:25:00+08:00", ["SSH", "incorrect_pwd"]),
-    ]
+    """从已有共用样本转换六份 BLAS 文件，全部 ADS 由容器内 Rust 工具生成。"""
+    source = Path("/argus/shared/records.jsonl")
+    rows = [json.loads(line) for line in source.read_text().splitlines()][:24]
+    assert len(rows) == 24, "共用样本至少需要 24 条记录"
+    public = [["FTP"], ["FTP", "incorrect_pwd"], ["FTP", "Admin", "incorrect_pwd"],
+              ["FTP", "incorrect_usr"], ["FTP", "incorrect_pwd"], ["SSH", "incorrect_pwd"]]
     records = []
-    for lid, fid, lower, upper, words in rows:
-        content = (fid + ":" + ",".join(words)).encode()
-        records.append({"lid": lid, "fid": fid, "ts_min": timestamp(lower), "ts_max": timestamp(upper),
-                        "fw": sorted(words), "bm_ew": "0x01", "rh": ["0x" + hashlib.sha256(content).hexdigest()]})
-    SAMPLE.parent.mkdir(parents=True, exist_ok=True)
+    inputs = []
+    FILES.mkdir(parents=True, exist_ok=True)
+    temporary = Path("/argus/run/generator-input.json")
+    for index, words in enumerate(public):
+        group = rows[index * 4:index * 4 + 4]
+        times = [group[i]["timestamp"] for i in (0, 0, 3, 2)]
+        entries = [{"sn": i, "timestamp": times[i], "keywords": sorted([row["key"], "error" if i % 2 == 0 else "debug"]),
+                    "log_value": row["value"]} for i, row in enumerate(group)]
+        value = {"lid": 2 if index == 4 else 1, "tx_public_keywords": words, "entries": entries}
+        temporary.write_text(json.dumps(value))
+        path = FILES / "building.json"
+        metadata = json.loads(subprocess.check_output([TOOL, "build", str(temporary), str(path)], text=True))
+        if index == 0:
+            Path("/argus/run/file-input.json").write_text(json.dumps(value))
+            Path("/argus/run/file-example.json").write_bytes(path.read_bytes())
+            Path("/argus/run/file-metadata.json").write_text(json.dumps(metadata))
+            query = {"generators": [], "time": [metadata["t_min"], metadata["t_max"]],
+                     "predicate": {"op": "all"}, "entry_predicate": {"op": "keyword", "args": "error"}, "aggregate": False}
+            Path("/argus/run/file-query.json").write_text(json.dumps(query))
+        path.replace(FILES / (metadata["omt_root"][2:] + ".json"))
+        records.append(metadata)
+        inputs.append(value)
     SAMPLE.write_text("".join(json.dumps(record, separators=(",", ":")) + "\n" for record in records))
-    print(json.dumps({"path": str(SAMPLE), "records": len(records), "sha256": hashlib.sha256(SAMPLE.read_bytes()).hexdigest()}))
+    INPUTS.write_text("".join(json.dumps(value) + "\n" for value in inputs))
+    result = {"path": str(SAMPLE), "files": 6, "entries": 24,
+              "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+              "sha256": hashlib.sha256(SAMPLE.read_bytes()).hexdigest()}
+    (SAMPLE.parent / "manifest.json").write_text(json.dumps(result, indent=2))
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
